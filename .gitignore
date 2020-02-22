@@ -1,8 +1,5 @@
-# Python
 __pycache__/
-
-# SQLite
 *.sqlite
-
-# VS Code
 .vscode/
+
+m4a/
