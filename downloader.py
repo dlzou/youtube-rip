@@ -43,7 +43,7 @@ def download_single(video_id):
         except Exception:
             print_stack()
     else:
-        print(f'Already downloaded at {filepath[0]}')
+        print(f'Already downloaded {filepath[0]}')
 
     conn.commit()
     conn.close()
@@ -101,7 +101,11 @@ def parse_url(url):
 if __name__ == "__main__":
     refresh_archive()
 
-    url = sys.argv[1]
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        print('No URL provided')
+        sys.exit(0)
     parsed = parse_url(url)
     if parsed is not None:
         if parsed['type'] == 'watch':
