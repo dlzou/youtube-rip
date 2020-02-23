@@ -21,31 +21,46 @@ OPTIONS = {
     'nooverwrites': True,
     'outtmpl': path.join(MUSIC_DIR, '%(title)s.%(ext)s'),
     'quiet': True,
-    'forcefilename': True,
-    'forceduration': True
+    'forcefilename': True
 }
 
 
 def download_single(video_id):
     conn = sqlite3.connect(ARCHIVE_DB)
     c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS Archive(video_id UNIQUE, filepath)')
+    c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath)')
     c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
-    filepath = c.fetchone()[0]
+    filepath = c.fetchone()
 
-    if filepath is None or not path.exists(filepath):
+    if not filepath:
         try:
             with dl.YoutubeDL(OPTIONS) as ydl:
+                print('Downloading...')
                 ydl.download([video_id])
                 title = ydl.extract_info(video_id, download=False).get('title', None)
-                if filepath is None and title is not None:
+                if title is not None:
                     filepath = path.join(MUSIC_DIR, f'{title}.{EXT}')
-                    c.execute('INSERT INTO Archive VALUES(?, ?)', (video_id, filepath))
+                    c.execute('INSERT INTO archive VALUES(?, ?)', (video_id, filepath))
         except Exception:
             print_exc()
     else:
-        print(f'Already downloaded at {filepath}')
+        print(f'Already downloaded at {filepath[0]}')
 
+    conn.commit()
+    conn.close()
+
+
+def refresh_archive():
+    conn = sqlite3.connect(ARCHIVE_DB)
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath)')
+    c.execute('SELECT filepath FROM archive')
+    filepaths = c.fetchall()
+
+    if filepaths:
+        for f in filepaths:
+            if not path.exists(f[0]):
+                c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
     conn.commit()
     conn.close()
 
@@ -70,7 +85,9 @@ def parse_url(url):
 
 
 if __name__ == "__main__":
-    url = 'https://www.youtube.com/watch?v=kl4_Z7_0rmA'
+    refresh_archive()
+
+    url = 'https://www.youtube.com/watch?v=MwpBCwgYc0o'
     parsed = parse_url(url)
     if parsed is not None:
         video_id = parsed['id']['v']
