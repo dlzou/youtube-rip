@@ -3,7 +3,7 @@ import sqlite3
 import re
 import sys
 from os import path
-from traceback import print_stack
+from traceback import print_exc
 
 CURRENT_DIR = path.dirname(path.abspath(__file__))
 DOWNLOAD_DIR = path.expanduser('~/Music/YouTube')
@@ -34,14 +34,14 @@ def download_single(video_id):
     if not filepath:
         try:
             with dl.YoutubeDL(OPTIONS) as ydl:
-                print(f'Downloading <{video_id}>...')
+                print(f'Downloading video <{video_id}>...')
                 info_dict = ydl.extract_info(video_id, download=True)
                 title = info_dict.get('title', None)
                 if title is not None:
                     filepath = path.join(DOWNLOAD_DIR, f'{title}.{EXT}')
                     c.execute('INSERT INTO archive VALUES(?, ?)', (video_id, filepath))
         except Exception:
-            print_stack()
+            print_exc()
     else:
         print(f'Already downloaded {filepath[0]}')
 
@@ -49,18 +49,24 @@ def download_single(video_id):
     conn.close()
 
 
-def download_playlist(list_id):
+def download_playlist(list_url, list_id):
     try:
         with dl.YoutubeDL({'quiet': True}) as ydl:
-            print(f'Extracting playlist <{list_id}>...')
-            info_dict = ydl.extract_info(list_id, download=False)
+            # Breaking the api for speed
+            print(f'Extracting video IDs from playlist <{list_id}>...')
+            extractor = ydl.get_info_extractor('YoutubePlaylist')
+            page = extractor._download_webpage(list_url, list_id)
+            video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
 
-            video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
+            # Slow because a lot of extra info downloaded
+            # info_dict = ydl.extract_info(list_id, download=False)
+            # video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
+
             for video_id in video_ids:
                 download_single(video_id)
 
     except Exception:
-        print_stack()
+        print_exc()
 
 
 def refresh_archive():
@@ -106,6 +112,7 @@ if __name__ == "__main__":
     else:
         print('No URL provided')
         sys.exit(0)
+
     parsed = parse_url(url)
     if parsed is not None:
         if parsed['type'] == 'watch':
@@ -113,6 +120,6 @@ if __name__ == "__main__":
             download_single(video_id)
         elif parsed['type'] == 'playlist':
             list_id = parsed['info']['list']
-            download_playlist(list_id)
+            download_playlist(url, list_id)
         else:
             print('URL not recognized, should contain \'watch\' or \'playlist\'')
