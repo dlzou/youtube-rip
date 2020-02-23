@@ -1,5 +1,3 @@
 __pycache__/
-*.sqlite
 .vscode/
-
-m4a/
+*.sqlite
