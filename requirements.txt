@@ -1,0 +1,8 @@
+certifi==2019.11.28
+entrypoints==0.3
+flake8==3.7.9
+future==0.18.2
+mccabe==0.6.1
+pycodestyle==2.5.0
+pyflakes==2.1.1
+youtube-dl==2020.2.16
