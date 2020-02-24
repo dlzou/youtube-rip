@@ -2,7 +2,6 @@ import youtube_dl as dl
 import sqlite3
 import re
 import argparse
-import sys
 from os import path
 from traceback import print_exc
 
@@ -135,26 +134,30 @@ def seconds_to_hours(seconds):
 if __name__ == "__main__":
     refresh_archive()
 
+    # Positional args must be before optional args
     parser = argparse.ArgumentParser()
-    # implement parser
+    parser.add_argument('url', nargs='?', help='video or playlist url')
+    parser.add_argument('-i', '--info', action='store_true', help='information about archive')
+    args = parser.parse_args()
 
-    if len(sys.argv) > 1:
-        url = sys.argv[1]
+    if args.url:
+        parsed = parse_url(args.url)
+        if parsed is not None:
+            if parsed['type'] == 'watch':
+                video_id = parsed['info']['v']
+                download_single(video_id)
+
+            elif parsed['type'] == 'playlist':
+                list_id = parsed['info']['list']
+                download_playlist(args.url, list_id)
+
+            else:
+                print('URL not recognized, should contain \'watch\' or \'playlist\'')
+
+    elif args.info:
+        info = archive_info()
+        print('Number of files: ' + str(info.get('num_files', None)))
+        print('Total duration: ' + info.get('total_duration', None))
+
     else:
-        print('No URL provided')
-        sys.exit(0)
-
-    parsed = parse_url(url)
-    if parsed is not None:
-        if parsed['type'] == 'watch':
-            video_id = parsed['info']['v']
-            download_single(video_id)
-        elif parsed['type'] == 'playlist':
-            list_id = parsed['info']['list']
-            download_playlist(url, list_id)
-        else:
-            print('URL not recognized, should contain \'watch\' or \'playlist\'')
-
-    info = archive_info()
-    print('Number of files: ' + str(info.get('num_files', None)))
-    print('Total duration: ' + info.get('total_duration', None))
+        print('No arguments specified, use --help')
