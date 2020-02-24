@@ -160,4 +160,4 @@ if __name__ == "__main__":
         print('Total duration: ' + info.get('total_duration', None))
 
     else:
-        print('No arguments specified, use --help')
+        print('No arguments specified, see --help')
