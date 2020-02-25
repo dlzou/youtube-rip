@@ -104,7 +104,7 @@ def archive_info():
 
 
 def parse_url(url):
-    yt_regex = r'(https?://)?(www\.)?youtube\.com/(watch|playlist)\?([-\w&=]+)'
+    yt_regex = r'(https?://)?(www\.)?youtube\.com/(watch|playlist)\?([-\w=]+)(&[-\w=]+)*'
     if re.match(yt_regex, url) is None:
         raise ValueError('invalid URL')
         return None
