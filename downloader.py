@@ -8,28 +8,35 @@ from os import path
 from traceback import print_exc
 
 CURRENT_DIR = path.dirname(path.abspath(__file__))
-DOWNLOAD_DIR = path.expanduser('~/Music/YouTube')
+ARCHIVE_DB = path.join(CURRENT_DIR, 'archive.sqlite')
+DEFAULT_DIR = path.expanduser('~/Music/YouTube')
 DEFAULT_EXT = 'm4a'
 VALID_EXT = ('m4a', 'mp3', 'aac', 'wav', 'opus', 'vorbis', 'best')
-ARCHIVE_DB = path.join(CURRENT_DIR, 'archive.sqlite')
 
 
-def ydl_options(ext):
-    options = {
-        'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': ext,
-            'preferredquality': '192'
-        }],
-        'outtmpl': path.join(DOWNLOAD_DIR, f'%(title)s.{ext}'),
-        'quiet': True,
-        'forcefilename': True
-    }
-    return options
+class Options:
+    """Contains options passed by user"""
+
+    def __init__(self, ext, folder):
+        self.ext = ext
+        self.folder = folder
+
+    def dl(self):
+        opt = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': ext,
+                'preferredquality': '192'
+            }],
+            'outtmpl': path.join(folder, f'%(title)s.{ext}'),
+            'quiet': True,
+            'forcefilename': True
+        }
+        return opt
 
 
-def download_single(video_id, ext):
+def download_single(video_id, options):
     """Download a single file and write to archive"""
 
     conn = sqlite3.connect(ARCHIVE_DB)
@@ -40,13 +47,13 @@ def download_single(video_id, ext):
     if not filepath:
         try:
             print(f'Downloading video <{video_id}>...')
-            ydl = dl.YoutubeDL(ydl_options(ext))
+            ydl = dl.YoutubeDL(options.dl())
             info_dict = ydl.extract_info(video_id, download=True)
             title = info_dict.get('title', None)
             duration = info_dict.get('duration', None)
 
             if title is not None and duration is not None:
-                filepath = path.join(DOWNLOAD_DIR, f'{title}.{ext}')
+                filepath = path.join(options.folder, f'{title}.{options.ext}')
                 c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
 
         except Exception:
@@ -58,7 +65,7 @@ def download_single(video_id, ext):
     conn.close()
 
 
-def download_playlist(list_url, list_id, ext):
+def download_playlist(list_url, list_id, options):
     """Download multiple files from a playlist, single process execution"""
 
     try:
@@ -75,17 +82,17 @@ def download_playlist(list_url, list_id, ext):
         # video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
 
         for video_id in video_ids:
-            download_single(video_id, ext)
+            download_single(video_id, options)
 
     except Exception:
         print_exc()
 
 
-def _download(video_id):
+def _download(video_id, options):
     """Single process to download a file, used in multiprocessing"""
 
     try:
-        ydl = dl.YoutubeDL(ydl_options(ext))
+        ydl = dl.YoutubeDL(options.dl())
         print(f'Downloading video <{video_id}>...')
         info_dict = ydl.extract_info(video_id, download=True)
         title = info_dict.get('title', None)
@@ -100,7 +107,7 @@ def _download(video_id):
         print_exc()
 
 
-def download_playlist_mp(list_url, list_id, ext):
+def download_playlist_mp(list_url, list_id, options):
     """Download multiple files from a playlist, single process execution"""
 
     try:
@@ -118,7 +125,7 @@ def download_playlist_mp(list_url, list_id, ext):
         print_exc()
 
 
-def filter_existing(video_ids, ext):
+def filter_existing(video_ids):
     conn = sqlite3.connect(ARCHIVE_DB)
     c = conn.cursor()
     i = 0
@@ -148,20 +155,27 @@ def refresh_archive():
                 c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
     conn.commit()
     conn.close()
+    print('Refreshed archive')
 
 
 def archive_info():
     conn = sqlite3.connect(ARCHIVE_DB)
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM archive')
-    num_files = c.fetchone()[0]
+    c.execute('SELECT filepath FROM archive')
+    filepaths = c.fetchall()
     c.execute('SELECT SUM(duration) FROM archive')
-    total_duration = seconds_to_hours(c.fetchone()[0])
+    total_duration = c.fetchone()[0]
     conn.commit()
     conn.close()
 
+    size = 0
+    for f in filepaths:
+        size += path.getsize(f[0])
+    size = int((size / (1000 ** 2)) * 100) / 100
+
     info = {
-        'num_files': num_files,
+        'num_files': len(filepaths),
+        'total_size': size,
         'total_duration': total_duration
     }
     return info
@@ -202,6 +216,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('url', nargs='?', help='video or playlist url')
     parser.add_argument('-f', '--format', nargs=1, help='file download format')
+    parser.add_argument('-d', '--directory', nargs=1, help='download to this directory')
     parser.add_argument('-i', '--info', action='store_true', help='information about archive')
     args = parser.parse_args()
 
@@ -214,15 +229,24 @@ if __name__ == "__main__":
             print(f'Not a valid format {VALID_EXT}')
             sys.exit(0)
 
+        if not args.directory:
+            folder = DEFAULT_DIR
+        else:
+            folder = args.directory[0]
+        if not path.exists(folder):
+            print('Not a valid directory')
+            sys.exit(0)
+        options = Options(ext, folder)
+
         parsed = parse_url(args.url)
         if parsed is not None:
             if parsed['type'] == 'watch':
                 video_id = parsed['info']['v']
-                download_single(video_id, ext)
+                download_single(video_id, options)
 
             elif parsed['type'] == 'playlist':
                 list_id = parsed['info']['list']
-                download_playlist(args.url, list_id, ext)
+                download_playlist(args.url, list_id, options)
 
             else:
                 print('URL not recognized, should contain \'watch\' or \'playlist\'')
@@ -230,7 +254,8 @@ if __name__ == "__main__":
     elif args.info:
         info = archive_info()
         print('Number of files: ' + str(info.get('num_files', None)))
-        print('Total duration: ' + info.get('total_duration', None))
+        print('Total size: ' + str(info.get('total_size', None)) + ' MB')
+        print('Total duration: ' + seconds_to_hours(info.get('total_duration', None)))
 
     else:
         print('Invalid arguments, see --help')
