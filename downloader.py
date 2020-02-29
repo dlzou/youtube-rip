@@ -9,7 +9,7 @@ from traceback import print_exc
 
 CURRENT_DIR = path.dirname(path.abspath(__file__))
 ARCHIVE_DB = path.join(CURRENT_DIR, 'archive.sqlite')
-DEFAULT_DIR = path.expanduser('~/Music/YouTube')
+DEFAULT_LOCATION = path.expanduser('~/Music/YouTube')
 DEFAULT_EXT = 'm4a'
 VALID_EXT = ('m4a', 'mp3', 'aac', 'wav', 'opus', 'vorbis', 'best')
 
@@ -17,19 +17,19 @@ VALID_EXT = ('m4a', 'mp3', 'aac', 'wav', 'opus', 'vorbis', 'best')
 class Options:
     """Contains options passed by user"""
 
-    def __init__(self, ext, folder):
-        self.ext = ext
-        self.folder = folder
+    def __init__(self, extension, location):
+        self.extension = extension
+        self.location = location
 
     def dl(self):
         opt = {
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': ext,
+                'preferredcodec': extension,
                 'preferredquality': '192'
             }],
-            'outtmpl': path.join(folder, f'%(title)s.{ext}'),
+            'outtmpl': path.join(location, f'%(title)s.{extension}'),
             'quiet': True,
             'forcefilename': True
         }
@@ -53,7 +53,7 @@ def download_single(video_id, options):
             duration = info_dict.get('duration', None)
 
             if title is not None and duration is not None:
-                filepath = path.join(options.folder, f'{title}.{options.ext}')
+                filepath = path.join(options.location, f'{title}.{options.extension}')
                 c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
 
         except Exception:
@@ -212,31 +212,30 @@ def seconds_to_hours(seconds):
 if __name__ == "__main__":
     refresh_archive()
 
-    # Positional args must be before optional args
     parser = argparse.ArgumentParser()
     parser.add_argument('url', nargs='?', help='video or playlist url')
     parser.add_argument('-f', '--format', nargs=1, help='file download format')
-    parser.add_argument('-d', '--directory', nargs=1, help='download to this directory')
+    parser.add_argument('-l', '--location', nargs=1, help='download location in filesystem')
     parser.add_argument('-i', '--info', action='store_true', help='information about archive')
     args = parser.parse_args()
 
     if args.url:
         if not args.format:
-            ext = DEFAULT_EXT
+            extension = DEFAULT_EXT
         else:
-            ext = args.format[0]
-        if ext not in VALID_EXT:
+            extension = args.format[0]
+        if extension not in VALID_EXT:
             print(f'Not a valid format {VALID_EXT}')
             sys.exit(0)
 
-        if not args.directory:
-            folder = DEFAULT_DIR
+        if not args.location:
+            location = DEFAULT_LOCATION
         else:
-            folder = args.directory[0]
-        if not path.exists(folder):
+            location = args.location[0]
+        if not path.isdir(location):
             print('Not a valid directory')
             sys.exit(0)
-        options = Options(ext, folder)
+        options = Options(extension, location)
 
         parsed = parse_url(args.url)
         if parsed is not None:
