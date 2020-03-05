@@ -1,11 +1,10 @@
 import youtube_dl as dl
-import multiprocessing as mp
 import sqlite3
 import argparse
 import re
 import sys
+from multiprocessing import Pool
 from os import path
-from traceback import print_exc
 
 CURRENT_DIR = path.dirname(path.abspath(__file__))
 ARCHIVE_DB = path.join(CURRENT_DIR, 'archive.sqlite')
@@ -21,7 +20,7 @@ class Options:
         self.extension = extension
         self.location = location
 
-    def dl(self):
+    def gen(self):
         opt = {
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -39,30 +38,35 @@ class Options:
 def download_single(video_id, options):
     """Download a single file and write to archive"""
 
-    conn = sqlite3.connect(ARCHIVE_DB)
-    c = conn.cursor()
-    c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
-    filepath = c.fetchone()
+    try:
+        conn = sqlite3.connect(ARCHIVE_DB)
+        c = conn.cursor()
+        c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
+        filepath = c.fetchone()
+        conn.commit()
+        conn.close()
 
-    if not filepath:
-        try:
-            print(f'Downloading video <{video_id}>...')
-            ydl = dl.YoutubeDL(options.dl())
-            info_dict = ydl.extract_info(video_id, download=True)
-            title = info_dict.get('title', None)
-            duration = info_dict.get('duration', None)
+        if not filepath:
+            print(f'Downloading audio from <{video_id}>...')
+            with dl.YoutubeDL(options.gen()) as ydl:
+                info_dict = ydl.extract_info(video_id, download=True)
+                title = info_dict.get('title', None)
+                duration = info_dict.get('duration', None)
 
-            if title is not None and duration is not None:
-                filepath = path.join(options.location, f'{title}.{options.extension}')
-                c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+            if title and duration is not None:
+                row = {
+                    'video_id': video_id,
+                    'title': title,
+                    'duration': duration
+                }
+                insert_all((row,))
+            else:
+                print(f'Failed to archive <{video_id}>')
+        else:
+            print(f'Already downloaded {filepath[0]}')
 
-        except Exception:
-            print_exc()
-    else:
-        print(f'Already downloaded {filepath[0]}')
-
-    conn.commit()
-    conn.close()
+    except Exception as e:
+        print(e)
 
 
 def download_playlist(list_url, list_id, options):
@@ -70,59 +74,67 @@ def download_playlist(list_url, list_id, options):
 
     try:
         print(f'Extracting video IDs from playlist <{list_id}>...')
-        ydl = dl.YoutubeDL({'quiet': True})
+        with dl.YoutubeDL({'quiet': True}) as ydl:
+            # Slower because a lot of extra info downloaded
+            info_dict = ydl.extract_info(list_id, download=False)
+            video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
 
-        # Slower because a lot of extra info downloaded
-        info_dict = ydl.extract_info(list_id, download=False)
-        video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
+            # Breaking the api for speed, limit of 35 videos
+            # extractor = ydl.get_info_extractor('YoutubePlaylist')
+            # page = extractor._download_webpage(list_url, list_id)
+            # video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
 
-        # Breaking the api for speed, limit of 35 videos
-        # extractor = ydl.get_info_extractor('YoutubePlaylist')
-        # page = extractor._download_webpage(list_url, list_id)
-        # video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
+    except Exception as e:
+        print(e)
 
+    else:
         for video_id in video_ids:
             download_single(video_id, options)
-
-    except Exception:
-        print_exc()
 
 
 def _download(video_id, options):
     """Single process to download a file, used in multiprocessing"""
 
     try:
-        ydl = dl.YoutubeDL(options.dl())
-        print(f'Downloading video <{video_id}>...')
-        info_dict = ydl.extract_info(video_id, download=True)
-        title = info_dict.get('title', None)
-        duration = info_dict.get('duration', None)
-        info = {
-            'title': title,
-            'duration': duration
-        }
-        return info
+        print(f'Downloading audio from <{video_id}>...')
+        with dl.YoutubeDL(options.gen()) as ydl:
+            info_dict = ydl.extract_info(video_id, download=True)
+            title = info_dict.get('title', None)
+            duration = info_dict.get('duration', None)
 
-    except Exception:
-        print_exc()
+        if title and duration is not None:
+            row = {
+                'video_id': video_id,
+                'title': title,
+                'duration': duration
+            }
+            return row
+        else:
+            print(f'Failed get information from <{video_id}>')
+
+    except Exception as e:
+        print(e)
 
 
 def download_playlist_mp(list_url, list_id, options):
-    """Download multiple files from a playlist, single process execution"""
+    """Download multiple files from a playlist, multiple processes"""
 
     try:
-        ydl = dl.YoutubeDL({'quiet': True})
         print(f'Extracting video IDs from playlist <{list_id}>...')
+        with dl.YoutubeDL({'quiet': True}) as ydl:
+            # Still painfully slow
+            info_dict = ydl.extract_info(list_id, download=False)
+            video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
 
-        info_dict = ydl.extract_info(list_id, download=False)
-        video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
         filter_existing(video_ids)
+        with Pool() as pool:
+            rows = pool.starmap(_download, [(video_id, options) for video_id in video_ids])
 
-        # multiprocessing
+    except Exception as e:
+        print(e)
 
-
-    except Exception:
-        print_exc()
+    else:
+        insert_all(rows)
 
 
 def filter_existing(video_ids):
@@ -131,15 +143,35 @@ def filter_existing(video_ids):
     i = 0
 
     while i < len(video_ids):
-        filepath = c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
-        if not filepath:
-            i += 1
-        else:
+        c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
+        filepath = c.fetchone()
+        if filepath:
             print(f'Already downloaded {filepath[0]}')
             video_ids.pop(i)
+        else:
+            i += 1
 
     conn.commit()
     conn.close()
+
+
+def insert_all(rows):
+    try:
+        conn = sqlite3.connect(ARCHIVE_DB)
+        c = conn.cursor()
+        for r in rows:
+            if type(r) is dict:
+                video_id = r.get('video_id')
+                title = r.get('title')
+                duration = r.get('duration')
+                if video_id and title and duration is not None:
+                    filepath = path.join(options.location, f'{title}.{options.extension}')
+                    c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+        conn.commit()
+        conn.close()
+
+    except sqlite3.Error as e:
+        print(e)
 
 
 def refresh_archive():
@@ -245,7 +277,7 @@ if __name__ == "__main__":
 
             elif parsed['type'] == 'playlist':
                 list_id = parsed['info']['list']
-                download_playlist(args.url, list_id, options)
+                download_playlist_mp(args.url, list_id, options)
 
             else:
                 print('URL not recognized, should contain \'watch\' or \'playlist\'')
