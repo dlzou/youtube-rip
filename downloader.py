@@ -51,6 +51,7 @@ class Archive:
             for f in filepaths:
                 if not path.exists(f[0]):
                     self.c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
+        self.connection.commit()
         print('Archive has been refreshed')
 
 
@@ -82,6 +83,7 @@ class Archive:
                 if video_id and title and duration is not None:
                     filepath = path.join(options.location, dl.utils.sanitize_filename(f'{title}.{options.extension}'))
                     self.c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+        self.connection.commit()
         print(f'{len(rows)} file(s) archived')
 
 
@@ -131,16 +133,17 @@ def download_single(video_id, options, archive):
 
 
 def download_playlist(list_url, list_id, options, archive):
-    """Download multiple files from a playlist, single process execution"""
+    """
+    DEPRECATED
+    Download multiple files from a playlist, single process execution
+    """
 
     try:
         print(f'Extracting video IDs from playlist <{list_id}>...')
         with dl.YoutubeDL({'quiet': True}) as ydl:
-            # Slower because a lot of extra info downloaded
             info_dict = ydl.extract_info(list_id, download=False)
             video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
 
-            # Breaking the api for speed, limit of 35 videos
             # extractor = ydl.get_info_extractor('YoutubePlaylist')
             # page = extractor._download_webpage(list_url, list_id)
             # video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
@@ -183,9 +186,14 @@ def download_playlist_mp(list_url, list_id, options, archive):
     try:
         print(f'Extracting video IDs from playlist <{list_id}>...')
         with dl.YoutubeDL({'quiet': True}) as ydl:
-            # Still painfully slow
-            info_dict = ydl.extract_info(list_id, download=False)
-            video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
+            # Painfully slow
+            # info_dict = ydl.extract_info(list_id, download=False)
+            # video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
+
+            # Breaking the api for speed
+            extractor = ydl.get_info_extractor('YoutubePlaylist')
+            page = extractor._download_webpage(list_url, list_id)
+            video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
 
         filtered = archive.filter_existing(video_ids)
         with Pool() as pool:
@@ -223,7 +231,7 @@ def seconds_to_hours(seconds):
     seconds %= 3600
     minutes = seconds // 60
     seconds %= 60
-    return f'{hours}:{minutes}:{seconds}'
+    return f'{hours}:{minutes:02d}:{seconds:02d}'
 
 
 if __name__ == "__main__":
@@ -260,11 +268,9 @@ if __name__ == "__main__":
             if parsed['type'] == 'watch':
                 video_id = parsed['info']['v']
                 download_single(video_id, options, archive)
-
             elif parsed['type'] == 'playlist':
                 list_id = parsed['info']['list']
                 download_playlist_mp(args.url, list_id, options, archive)
-
             else:
                 print('URL not recognized, should contain \'watch\' or \'playlist\'')
 
