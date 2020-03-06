@@ -2,7 +2,6 @@ import youtube_dl as dl
 import sqlite3
 import argparse
 import re
-import sys
 from multiprocessing import Pool
 from os import path
 
@@ -35,18 +34,89 @@ class Options:
         return opt
 
 
-def download_single(video_id, options):
+class Archive:
+    """Connection to SQLite database used as archive"""
+
+    def __init__(self, db_file):
+        self.connection = sqlite3.connect(db_file)
+        self.c = self.connection.cursor()
+
+
+    def refresh_archive(self):
+        self.c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath, duration)')
+        self.c.execute('SELECT filepath FROM archive')
+        filepaths = self.c.fetchall()
+
+        if filepaths:
+            for f in filepaths:
+                if not path.exists(f[0]):
+                    self.c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
+        print('Archive has been refreshed')
+
+
+    def archive_info(self):
+        self.c.execute('SELECT filepath FROM archive')
+        filepaths = self.c.fetchall()
+        self.c.execute('SELECT SUM(duration) FROM archive')
+        total_duration = self.c.fetchone()[0]
+
+        size = 0
+        for f in filepaths:
+            size += path.getsize(f[0])
+        size = int((size / (1000 ** 2)) * 100) / 100
+
+        info = {
+            'num_files': len(filepaths),
+            'total_size': size,
+            'total_duration': total_duration
+        }
+        return info
+
+
+    def insert_all(self, rows):
+        for r in rows:
+            if type(r) is dict:
+                video_id = r.get('video_id')
+                title = r.get('title')
+                duration = r.get('duration')
+                if video_id and title and duration is not None:
+                    filepath = path.join(options.location, dl.utils.sanitize_filename(f'{title}.{options.extension}'))
+                    self.c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+        print(f'{len(rows)} file(s) archived')
+
+
+    def filter_existing(self, video_ids):
+        video_ids = video_ids[:]
+        i = 0
+        while i < len(video_ids):
+            self.c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
+            filepath = self.c.fetchone()
+            if filepath:
+                print(f'Already downloaded {filepath[0]}')
+                video_ids.pop(i)
+            else:
+                i += 1
+        return video_ids
+
+
+    def close(self):
+        self.connection.commit()
+        self.connection.close()
+
+
+def download_single(video_id, options, archive):
     """Download a single file and write to archive"""
 
     try:
-        conn = sqlite3.connect(ARCHIVE_DB)
-        c = conn.cursor()
-        c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
-        filepath = c.fetchone()
-        conn.commit()
-        conn.close()
+        # conn = sqlite3.connect(ARCHIVE_DB)
+        # c = conn.cursor()
+        # c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
+        # filepath = c.fetchone()
+        # conn.commit()
+        # conn.close()
 
-        if not filepath:
+        filtered = archive.filter_existing([video_id])
+        if filtered:
             print(f'Downloading audio from <{video_id}>...')
             with dl.YoutubeDL(options.gen()) as ydl:
                 info_dict = ydl.extract_info(video_id, download=True)
@@ -59,17 +129,15 @@ def download_single(video_id, options):
                     'title': title,
                     'duration': duration
                 }
-                insert_all((row,))
+                archive.insert_all((row,))
             else:
                 print(f'Failed to archive <{video_id}>')
-        else:
-            print(f'Already downloaded {filepath[0]}')
 
     except Exception as e:
         print(e)
 
 
-def download_playlist(list_url, list_id, options):
+def download_playlist(list_url, list_id, options, archive):
     """Download multiple files from a playlist, single process execution"""
 
     try:
@@ -89,7 +157,7 @@ def download_playlist(list_url, list_id, options):
 
     else:
         for video_id in video_ids:
-            download_single(video_id, options)
+            download_single(video_id, options, archive)
 
 
 def _download(video_id, options):
@@ -116,7 +184,7 @@ def _download(video_id, options):
         print(e)
 
 
-def download_playlist_mp(list_url, list_id, options):
+def download_playlist_mp(list_url, list_id, options, archive):
     """Download multiple files from a playlist, multiple processes"""
 
     try:
@@ -126,91 +194,91 @@ def download_playlist_mp(list_url, list_id, options):
             info_dict = ydl.extract_info(list_id, download=False)
             video_ids = [entry.get('id', None) for entry in info_dict.get('entries', None)]
 
-        filter_existing(video_ids)
+        filtered = archive.filter_existing(video_ids)
         with Pool() as pool:
-            rows = pool.starmap(_download, [(video_id, options) for video_id in video_ids])
+            rows = pool.starmap(_download, [(video_id, options) for video_id in filtered])
 
     except Exception as e:
         print(e)
 
     else:
-        insert_all(rows)
+        archive.insert_all(rows)
 
 
-def filter_existing(video_ids):
-    conn = sqlite3.connect(ARCHIVE_DB)
-    c = conn.cursor()
-    i = 0
+# def filter_existing(video_ids):
+#     conn = sqlite3.connect(ARCHIVE_DB)
+#     c = conn.cursor()
+#     i = 0
 
-    while i < len(video_ids):
-        c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
-        filepath = c.fetchone()
-        if filepath:
-            print(f'Already downloaded {filepath[0]}')
-            video_ids.pop(i)
-        else:
-            i += 1
+#     while i < len(video_ids):
+#         c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
+#         filepath = c.fetchone()
+#         if filepath:
+#             print(f'Already downloaded {filepath[0]}')
+#             video_ids.pop(i)
+#         else:
+#             i += 1
 
-    conn.commit()
-    conn.close()
-
-
-def insert_all(rows):
-    try:
-        conn = sqlite3.connect(ARCHIVE_DB)
-        c = conn.cursor()
-        for r in rows:
-            if type(r) is dict:
-                video_id = r.get('video_id')
-                title = r.get('title')
-                duration = r.get('duration')
-                if video_id and title and duration is not None:
-                    filepath = path.join(options.location, f'{title}.{options.extension}')
-                    c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
-        conn.commit()
-        conn.close()
-
-    except sqlite3.Error as e:
-        print(e)
+#     conn.commit()
+#     conn.close()
 
 
-def refresh_archive():
-    conn = sqlite3.connect(ARCHIVE_DB)
-    c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath, duration)')
-    c.execute('SELECT filepath FROM archive')
-    filepaths = c.fetchall()
+# def insert_all(rows):
+#     try:
+#         conn = sqlite3.connect(ARCHIVE_DB)
+#         c = conn.cursor()
+#         for r in rows:
+#             if type(r) is dict:
+#                 video_id = r.get('video_id')
+#                 title = r.get('title')
+#                 duration = r.get('duration')
+#                 if video_id and title and duration is not None:
+#                     filepath = path.join(options.location, f'{title}.{options.extension}')
+#                     c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+#         conn.commit()
+#         conn.close()
 
-    if filepaths:
-        for f in filepaths:
-            if not path.exists(f[0]):
-                c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
-    conn.commit()
-    conn.close()
-    print('Refreshed archive')
+#     except sqlite3.Error as e:
+#         print(e)
 
 
-def archive_info():
-    conn = sqlite3.connect(ARCHIVE_DB)
-    c = conn.cursor()
-    c.execute('SELECT filepath FROM archive')
-    filepaths = c.fetchall()
-    c.execute('SELECT SUM(duration) FROM archive')
-    total_duration = c.fetchone()[0]
-    conn.commit()
-    conn.close()
+# def refresh_archive():
+#     conn = sqlite3.connect(ARCHIVE_DB)
+#     c = conn.cursor()
+#     c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath, duration)')
+#     c.execute('SELECT filepath FROM archive')
+#     filepaths = c.fetchall()
 
-    size = 0
-    for f in filepaths:
-        size += path.getsize(f[0])
-    size = int((size / (1000 ** 2)) * 100) / 100
+#     if filepaths:
+#         for f in filepaths:
+#             if not path.exists(f[0]):
+#                 c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
+#     conn.commit()
+#     conn.close()
+#     print('Refreshed archive')
 
-    info = {
-        'num_files': len(filepaths),
-        'total_size': size,
-        'total_duration': total_duration
-    }
-    return info
+
+# def archive_info():
+#     conn = sqlite3.connect(ARCHIVE_DB)
+#     c = conn.cursor()
+#     c.execute('SELECT filepath FROM archive')
+#     filepaths = c.fetchall()
+#     c.execute('SELECT SUM(duration) FROM archive')
+#     total_duration = c.fetchone()[0]
+#     conn.commit()
+#     conn.close()
+
+#     size = 0
+#     for f in filepaths:
+#         size += path.getsize(f[0])
+#     size = int((size / (1000 ** 2)) * 100) / 100
+
+#     info = {
+#         'num_files': len(filepaths),
+#         'total_size': size,
+#         'total_duration': total_duration
+#     }
+#     return info
 
 
 def parse_url(url):
@@ -242,7 +310,8 @@ def seconds_to_hours(seconds):
 
 
 if __name__ == "__main__":
-    refresh_archive()
+    archive = Archive(ARCHIVE_DB)
+    archive.refresh_archive()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('url', nargs='?', help='video or playlist url')
@@ -257,36 +326,38 @@ if __name__ == "__main__":
         else:
             extension = args.format[0]
         if extension not in VALID_EXT:
-            print(f'Not a valid format {VALID_EXT}')
-            sys.exit(0)
+            archive.close()
+            raise SystemExit(f'Not a valid format {VALID_EXT}')
 
         if not args.location:
             location = DEFAULT_LOCATION
         else:
             location = args.location[0]
         if not path.isdir(location):
-            print('Not a valid directory')
-            sys.exit(0)
+            archive.close()
+            raise SystemExit('Not a valid directory')
         options = Options(extension, location)
 
         parsed = parse_url(args.url)
         if parsed is not None:
             if parsed['type'] == 'watch':
                 video_id = parsed['info']['v']
-                download_single(video_id, options)
+                download_single(video_id, options, archive)
 
             elif parsed['type'] == 'playlist':
                 list_id = parsed['info']['list']
-                download_playlist_mp(args.url, list_id, options)
+                download_playlist_mp(args.url, list_id, options, archive)
 
             else:
                 print('URL not recognized, should contain \'watch\' or \'playlist\'')
 
     elif args.info:
-        info = archive_info()
+        info = archive.archive_info()
         print('Number of files: ' + str(info.get('num_files', None)))
         print('Total size: ' + str(info.get('total_size', None)) + ' MB')
         print('Total duration: ' + seconds_to_hours(info.get('total_duration', None)))
 
     else:
         print('Invalid arguments, see --help')
+
+    archive.close()
