@@ -108,13 +108,6 @@ def download_single(video_id, options, archive):
     """Download a single file and write to archive"""
 
     try:
-        # conn = sqlite3.connect(ARCHIVE_DB)
-        # c = conn.cursor()
-        # c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_id,))
-        # filepath = c.fetchone()
-        # conn.commit()
-        # conn.close()
-
         filtered = archive.filter_existing([video_id])
         if filtered:
             print(f'Downloading audio from <{video_id}>...')
@@ -203,82 +196,6 @@ def download_playlist_mp(list_url, list_id, options, archive):
 
     else:
         archive.insert_all(rows)
-
-
-# def filter_existing(video_ids):
-#     conn = sqlite3.connect(ARCHIVE_DB)
-#     c = conn.cursor()
-#     i = 0
-
-#     while i < len(video_ids):
-#         c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
-#         filepath = c.fetchone()
-#         if filepath:
-#             print(f'Already downloaded {filepath[0]}')
-#             video_ids.pop(i)
-#         else:
-#             i += 1
-
-#     conn.commit()
-#     conn.close()
-
-
-# def insert_all(rows):
-#     try:
-#         conn = sqlite3.connect(ARCHIVE_DB)
-#         c = conn.cursor()
-#         for r in rows:
-#             if type(r) is dict:
-#                 video_id = r.get('video_id')
-#                 title = r.get('title')
-#                 duration = r.get('duration')
-#                 if video_id and title and duration is not None:
-#                     filepath = path.join(options.location, f'{title}.{options.extension}')
-#                     c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
-#         conn.commit()
-#         conn.close()
-
-#     except sqlite3.Error as e:
-#         print(e)
-
-
-# def refresh_archive():
-#     conn = sqlite3.connect(ARCHIVE_DB)
-#     c = conn.cursor()
-#     c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath, duration)')
-#     c.execute('SELECT filepath FROM archive')
-#     filepaths = c.fetchall()
-
-#     if filepaths:
-#         for f in filepaths:
-#             if not path.exists(f[0]):
-#                 c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
-#     conn.commit()
-#     conn.close()
-#     print('Refreshed archive')
-
-
-# def archive_info():
-#     conn = sqlite3.connect(ARCHIVE_DB)
-#     c = conn.cursor()
-#     c.execute('SELECT filepath FROM archive')
-#     filepaths = c.fetchall()
-#     c.execute('SELECT SUM(duration) FROM archive')
-#     total_duration = c.fetchone()[0]
-#     conn.commit()
-#     conn.close()
-
-#     size = 0
-#     for f in filepaths:
-#         size += path.getsize(f[0])
-#     size = int((size / (1000 ** 2)) * 100) / 100
-
-#     info = {
-#         'num_files': len(filepaths),
-#         'total_size': size,
-#         'total_duration': total_duration
-#     }
-#     return info
 
 
 def parse_url(url):
