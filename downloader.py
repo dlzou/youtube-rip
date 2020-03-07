@@ -5,11 +5,26 @@ import re
 from multiprocessing import Pool
 from os import path
 
+""" downloader.py
+
+Download audio from YouTube videos and playlists. Each downloaded file is added to an archive so that it will not be
+redownloaded. At the start of each command, the archive is refreshed to reflect local changes.
+
+How to Use
+==========
+$ python3 downloader.py [--format EXT] [--location /PATH/TO/FOLDER] URL
+- if 'url' is from watch page (i.e. contains the word 'watch'), a single file is downloaded
+- else if 'url' is from playlist page (i.e. contains the word 'playlist'), every track in the playlist is downloaded
+----------
+$ python3 downloader.py --info
+- display information about the archive
+"""
+
 CURRENT_DIR = path.dirname(path.abspath(__file__))
 ARCHIVE_DB = path.join(CURRENT_DIR, 'archive.sqlite')
 DEFAULT_LOCATION = path.expanduser('~/Music/YouTube')
 DEFAULT_EXT = 'm4a'
-VALID_EXT = ('m4a', 'mp3', 'aac', 'wav', 'opus', 'vorbis', 'best')
+VALID_EXT = ('m4a', 'mp3', 'aac', 'wav', 'opus', 'best')
 
 
 class Options:
@@ -133,10 +148,7 @@ def download_single(video_id, options, archive):
 
 
 def download_playlist(list_url, list_id, options, archive):
-    """
-    DEPRECATED
-    Download multiple files from a playlist, single process execution
-    """
+    """Download multiple files from a playlist, single process (read: slow)"""
 
     try:
         print(f'Extracting video IDs from playlist <{list_id}>...')
