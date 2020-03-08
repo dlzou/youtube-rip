@@ -58,7 +58,7 @@ class Archive:
 
 
     def refresh_archive(self):
-        self.c.execute('CREATE TABLE IF NOT EXISTS archive(video_id UNIQUE, filepath, duration)')
+        self.c.execute('CREATE TABLE IF NOT EXISTS archive(video_id, filepath, ext, duration INT)')
         self.c.execute('SELECT filepath FROM archive')
         filepaths = self.c.fetchall()
 
@@ -67,7 +67,7 @@ class Archive:
                 if not path.exists(f[0]):
                     self.c.execute('DELETE FROM archive WHERE filepath=?', (f[0],))
         self.connection.commit()
-        print('Archive has been refreshed')
+        print('Refreshed archive')
 
 
     def archive_info(self):
@@ -89,7 +89,7 @@ class Archive:
         return info
 
 
-    def insert_all(self, rows):
+    def insert_all(self, rows, options):
         for r in rows:
             if type(r) is dict:
                 video_id = r.get('video_id')
@@ -97,16 +97,18 @@ class Archive:
                 duration = r.get('duration')
                 if video_id and title and duration is not None:
                     filepath = path.join(options.location, dl.utils.sanitize_filename(f'{title}.{options.extension}'))
-                    self.c.execute('INSERT INTO archive VALUES(?, ?, ?)', (video_id, filepath, duration))
+                    self.c.execute('INSERT INTO archive VALUES(?, ?, ?, ?)',
+                                   (video_id, filepath, options.extension, duration))
         self.connection.commit()
         print(f'{len(rows)} file(s) archived')
 
 
-    def filter_existing(self, video_ids):
+    def filter_existing(self, video_ids, options):
         video_ids = video_ids[:]
         i = 0
         while i < len(video_ids):
-            self.c.execute('SELECT filepath FROM archive WHERE video_id=?', (video_ids[i],))
+            self.c.execute('SELECT filepath FROM archive WHERE video_id=? AND ext=?',
+                           (video_ids[i], options.extension))
             filepath = self.c.fetchone()
             if filepath:
                 print(f'Already downloaded {filepath[0]}')
@@ -125,7 +127,7 @@ def download_single(video_id, options, archive):
     """Download a single file and write to archive"""
 
     try:
-        filtered = archive.filter_existing([video_id])
+        filtered = archive.filter_existing([video_id], options)
         if filtered:
             print(f'Downloading audio from <{video_id}>...')
             with dl.YoutubeDL(options.gen()) as ydl:
@@ -139,7 +141,7 @@ def download_single(video_id, options, archive):
                     'title': title,
                     'duration': duration
                 }
-                archive.insert_all((row,))
+                archive.insert_all((row,), options)
             else:
                 print(f'Failed to archive <{video_id}>')
 
@@ -207,7 +209,7 @@ def download_playlist_mp(list_url, list_id, options, archive):
             page = extractor._download_webpage(list_url, list_id)
             video_ids = [id for id, titles in extractor.extract_videos_from_page(page)]
 
-        filtered = archive.filter_existing(video_ids)
+        filtered = archive.filter_existing(video_ids, options)
         with Pool() as pool:
             rows = pool.starmap(_download, [(video_id, options) for video_id in filtered])
 
@@ -215,7 +217,7 @@ def download_playlist_mp(list_url, list_id, options, archive):
         print(e)
 
     else:
-        archive.insert_all(rows)
+        archive.insert_all(rows, options)
 
 
 def parse_url(url):
