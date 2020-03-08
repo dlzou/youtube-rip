@@ -254,8 +254,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('url', nargs='?', help='video or playlist url')
-    parser.add_argument('-f', '--format', nargs=1, help='file download format')
-    parser.add_argument('-l', '--location', nargs=1, help='download location in filesystem')
+    parser.add_argument('-f', '--format', nargs=1, metavar='EXT', help='file download format')
+    parser.add_argument('-l', '--location', nargs=1, metavar='PATH', help='download location in filesystem')
     parser.add_argument('-i', '--info', action='store_true', help='information about archive')
     args = parser.parse_args()
 
