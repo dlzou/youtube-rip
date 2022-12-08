@@ -1,4 +1,4 @@
-certifi==2019.11.28
+certifi==2022.12.7
 entrypoints==0.3
 flake8==3.7.9
 future==0.18.2
